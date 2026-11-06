@@ -1,8 +1,222 @@
 flows:
-  transfer_money:
-    description: Help users send money to friends and family.
+  greet_user:
+    description: |
+      Respond when the user's current message is a greeting.
+
+      Examples:
+      - "hi"
+      - "hey"
+      - "hello there"
+      - "good morning"
+
+      Do not start this flow for questions about letters or
+      taxes, or because an earlier message contained a greeting.
+      Do NOT start this flow for messages that are not a
+      greeting, such as "zxcv", "asdf qwer", or "???".
+    run_pattern_completed: false
     steps:
-      - collect: recipient
-      - collect: amount
-        description: the number of US dollars to send
-      - action: utter_transfer_complete
+      - action: utter_greet
+
+  ask_term_meaning:
+    description: |
+      Explain an official Dutch word or phrase that the user
+      does not understand, usually a term from a letter sent
+      by the municipality or another Dutch authority.
+
+      Examples:
+      - "I got a letter from the municipality and it mentions
+        'aanslag gemeentelijke belastingen'. What does that mean?"
+      - "What does 'rioolheffing' mean?"
+      - "There's a word in my letter I don't understand."
+
+      Do NOT start this flow for questions about waste tax
+      itself, such as "Is waste tax the same for everyone?".
+      Those belong to ask_waste_tax_info.
+
+      Do NOT start this flow for other questions about living
+      in the Netherlands, such as "How do I register at the
+      municipality?". Those are not supported: respond with
+      SearchAndReply().
+    run_pattern_completed: false
+    steps:
+      - set_slots:
+          - term_attempts: 0
+          - term_retry: false
+          - rephrase_count: 0
+
+      - id: ask_term
+        collect: term
+        description: |
+          The Dutch word or phrase the user does not understand,
+          copied exactly as it is written in the letter,
+          such as "aanslag gemeentelijke belastingen".
+
+          Keep the original Dutch wording. Do not translate it.
+          Do not invent a term. Do not treat "letter", "term",
+          or "word" as the term itself.
+
+          When the user answers this question with a word,
+          set it as the term, even if it looks unknown or
+          meaningless, such as "blabla". The assistant checks
+          the term itself. Do not cancel the flow for it.
+
+      - action: action_lookup_term
+        next:
+          - if: slots.term_known
+            then:
+              - action: utter_explain_term
+                next: END
+          - if: slots.term_attempts > 2
+            then:
+              - action: utter_term_referral
+                next: END
+          - else: ask_term
+
+  ask_waste_tax_info:
+    description: |
+      Answer the user's question about waste tax
+      (afvalstoffenheffing), the local charge for collecting
+      household waste.
+
+      Examples:
+      - "Is waste tax the same for everyone?"
+      - "How is the waste tax calculated?"
+      - "Why do I have to pay for waste collection?"
+
+      Do NOT start this flow when the user asks what a term
+      in a letter means. Those belong to ask_term_meaning.
+
+      Do NOT start this flow for other questions about living
+      in the Netherlands, such as "How do I register at the
+      municipality?". Those are not supported: respond with
+      SearchAndReply().
+    run_pattern_completed: false
+    steps:
+      - set_slots:
+          - tax_type: waste_tax
+          - rephrase_count: 0
+
+      - id: answer_waste_tax
+        collect: waste_tax_followup
+        utter: utter_waste_tax_answer
+        ask_before_filling: true
+        description: &followup_description |
+          What the user wants to do after the waste tax answer.
+
+          Set "confirm_understanding" when the user says it is
+          clear now, says thanks, or otherwise shows they
+          understand, such as "Ah now it's clear thnx",
+          "got it, thx", or "ok thank you, that makes sense".
+          These answers do not cancel the flow.
+
+          Set "more_info" when the user wants to know more
+          about waste tax, such as "tell me more".
+
+          Set "share_letter" when the user wants to share,
+          paste, or describe the content of the letter they
+          received, or pastes the letter text directly.
+        next:
+          - if: slots.waste_tax_followup == "more_info"
+            then: give_more_details
+          - if: slots.waste_tax_followup == "share_letter"
+            then: explain_letter
+          - else: confirm_understanding
+
+      - id: give_more_details
+        collect: waste_tax_followup
+        utter: utter_waste_tax_details
+        ask_before_filling: true
+        description: *followup_description
+        next:
+          - if: slots.waste_tax_followup == "more_info"
+            then:
+              - action: utter_waste_tax_no_more_info
+                next: anything_else
+          - if: slots.waste_tax_followup == "share_letter"
+            then: explain_letter
+          - else: confirm_understanding
+
+      - id: explain_letter
+        call: share_letter_content
+        next: anything_else
+
+      - id: confirm_understanding
+        action: utter_glad_to_hear
+        next: anything_else
+
+      - id: anything_else
+        link: offer_more_help
+
+  share_letter_content:
+    description: |
+      Explain what a letter says when the user wants to share,
+      paste, or describe the text of a letter they received.
+
+      Examples:
+      - "Can I send you the text of my letter?"
+      - "Here is my letter: ..."
+
+      Do NOT start this flow when the user only asks what a
+      single term means. Those belong to ask_term_meaning.
+    run_pattern_completed: false
+    steps:
+      - action: action_check_letter_in_message
+
+      - collect: letter_content
+        description: |
+          The text of the letter the user received, as pasted
+          or typed by the user. Copy it as completely as possible.
+          Do not summarise or translate it.
+
+          Only set this slot when the user gives the text of the
+          letter itself. Leave it unset for questions, such as
+          "Is waste tax the same for everyone?".
+
+      - action: action_explain_letter
+
+  offer_more_help:
+    if: False
+    description: |
+      Ask whether the user has another question, then continue
+      or close the conversation. Only started from other flows.
+    run_pattern_completed: false
+    steps:
+      - collect: anything_else
+        ask_before_filling: true
+        description: |
+          Whether the user has another question.
+
+          Set true when the user has another question or wants
+          more help, such as "yes" or "yes, I have another
+          question".
+
+          Set false when the user is done, such as "no",
+          "nope, that's all", "no thanks", "no, bye", or
+          "no that's it for now".
+
+          A "no" is an answer to this question. It does not
+          cancel the flow.
+        next:
+          - if: slots.anything_else
+            then:
+              - action: utter_how_else_can_i_help
+                next: END
+          - else:
+              - action: utter_goodbye
+                next: END
+
+  end_conversation:
+    description: |
+      Close the conversation when the user says goodbye or
+      indicates they are done and need no more help.
+
+      Examples:
+      - "bye!"
+      - "goodbye"
+      - "that's all"
+      - "no that's it for now"
+
+      Start it with StartFlow(end_conversation).
+    run_pattern_completed: false
+    steps:
+      - action: utter_goodbye

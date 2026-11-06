@@ -1,11 +1,74 @@
 flows:
   pattern_chitchat:
-    description: Conversation repair flow for off-topic interactions that won't disrupt the main conversation. should not respond to greetings or anything else for which there is a flow defined
+    description: |
+      Handle casual small talk, such as "how are you?"
+      or "you're a funny bot", without disrupting an active flow.
+
+      Do not handle greetings, questions about letters or taxes,
+      Dutch terms, or answers to questions asked by an active flow.
+
+      Responses such as "it's clear now", "tell me more", or
+      "no that's it for now" belong to the active flow.
     name: pattern chitchat
     steps:
       - action: utter_free_chitchat_response
+
   pattern_search:
-    description: Flow for handling knowledge-based questions
+    description: |
+      Handle informational questions that are not
+      supported by the assistant's existing flows.
     name: pattern search
+    run_pattern_completed: false
     steps:
-      - action: utter_free_chitchat_response
+      - action: utter_settlenl_scope
+
+  pattern_cancel_flow:
+    description: |
+      Handle a cancelled flow. The language model often
+      cancels the flow when the user answers "no" to
+      "Is there anything else you want to ask?". The user
+      is done then, so say goodbye as in the diagram.
+    name: pattern cancel flow
+    steps:
+      - action: action_cancel_flow
+      - noop: true
+        next:
+          - if: context.canceled_name == "offer more help"
+            then:
+              - action: utter_goodbye
+                next: END
+          - else:
+              - action: utter_flow_cancelled_rasa
+                next: END
+
+  pattern_cannot_handle:
+    description: |
+      Handle messages the assistant could not understand.
+      Ask the user to rephrase; after more than two failed
+      attempts, apologise and refer the user to the municipality.
+    name: pattern cannot handle
+    persisted_slots:
+      - rephrase_count
+    steps:
+      - noop: true
+        next:
+          - if: context.reason == "cannot_handle_chitchat"
+            then:
+              - action: utter_settlenl_scope
+                next: END
+          - if: context.reason == "cannot_handle_not_supported"
+            then:
+              - action: utter_settlenl_scope
+                next: END
+          - else:
+              - action: action_count_failed_attempt
+                next:
+                  - if: slots.rephrase_count > 2
+                    then:
+                      - action: utter_rephrase_referral
+                      - set_slots:
+                          - rephrase_count: 0
+                        next: END
+                  - else:
+                      - action: utter_ask_rephrase
+                        next: END
